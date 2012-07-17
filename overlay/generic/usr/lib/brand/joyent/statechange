@@ -140,11 +140,14 @@ setup_net()
 		blocked_outgoing_ports=$(eval \
 		    echo \$_ZONECFG_net_${nic}_blocked_outgoing_ports)
 		zone_ip=$(eval echo \$_ZONECFG_net_${nic}_ip)
+		zone_ip6=$(eval echo \$_ZONECFG_net_${nic}_ip6)
 		allow_dhcp_spoof=$(get_boolean_nic_property ${nic} allow_dhcp_spoofing)
 		allow_ip_spoof=$(get_boolean_nic_property ${nic} allow_ip_spoofing)
 		allow_mac_spoof=$(get_boolean_nic_property ${nic} allow_mac_spoofing)
 		allow_restricted_traffic=$(get_boolean_nic_property ${nic} \
 		    allow_restricted_traffic)
+		allowed_ips=$(eval echo ${zone_ip// } ${zone_ip6// } \
+		    | sed 's| |,|g;s|/[0-9]*||g')
 
 		# If address set, must be a shared stack zone
 		[[ -n $address ]] && exit 0
@@ -284,33 +287,16 @@ setup_net()
 			fi
 		fi
 
-
-		# Get the static IP for the vnic from the zone config file, but only
-		# if there's not an IP from the zone properties
-		hostname_file="$ZONEPATH/root/etc/hostname.$nic"
-		if [[ -z "${zone_ip}" ]] && [ -e $hostname_file ]; then
-			zone_ip=`nawk \
-			    '{if ($1 ~ /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)
-			    print $1}' $hostname_file`
-			/usr/sbin/zonecfg -z $ZONENAME "select net physical=${nic}; add property (name=ip, value=\"$zone_ip\"); end; exit"
-			if (( $? != 0 )); then
-				echo "error updating zone config ${nic} ${zone_ip}"
-				logger -p daemon.err "zone $ZONENAME error updating " \
-				    "zone config ${nic} ${zone_ip}"
-				exit 1
-			fi
-		fi
-
-		if [[ -n "${zone_ip}" ]] && [[ $allow_ip_spoof != "true" ]] && \
-			    [[ "${zone_ip}" != "dhcp" ]]; then
+		if [[ -n "${allowed_ips}" ]] && [[ $allow_ip_spoof != "true" ]] && \
+			    [[ "${zone_ip}" != "dhcp" ]] && [[ "${zone_ip6}" != "dhcp" ]]; then
 			dladm set-linkprop -t -z $ZONENAME \
-			    -p "allowed-ips=${zone_ip}" ${nic}
+			    -p "allowed-ips=${allowed_ips}" ${nic}
 			if (( $? != 0 )); then
-				echo "error setting VNIC allowed-ip " \
-				    "$nic $zone_ip"
+				echo "error setting VNIC allowed-ips " \
+				    "$nic $allowed_ips"
 				logger -p daemon.err "zone $ZONENAME " \
-				    "error setting VNIC allowed-ip " \
-				    "$nic $zone_ip"
+				    "error setting VNIC allowed-ips " \
+				    "$nic $allowed_ips"
 				exit 1
 			fi
 		fi
