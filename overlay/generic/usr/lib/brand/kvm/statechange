@@ -263,7 +263,8 @@ setup_net()
 
 
 		if [[ -n "${allowed_ips}" ]] && [[ $allow_ip_spoof != "true" ]] && \
-			    [[ "${zone_ip}" != "dhcp" ]]  && [[ "${zone_ip6}" != "dhcp" ]]; then
+			    [[ "${zone_ip}" != "dhcp" ]]  && [[ "${zone_ip6}" != "dhcp" ]] && \
+			    [[ "${zone_ip6}" != "auto" ]]; then
 			dladm set-linkprop -t -z $ZONENAME \
 			    -p "allowed-ips=${allowed_ips}" ${nic}
 			if (( $? != 0 )); then
