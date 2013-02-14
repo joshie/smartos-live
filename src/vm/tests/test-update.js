@@ -30,6 +30,17 @@ var PAYLOADS = {
                 "mac": "01:02:03:04:05:06"
             }
         ]
+    }, "add_net1": {
+        "add_nics": [
+            {
+                "ip": "10.99.99.12,10.99.99.33,10.99.99.34",
+                "netmask": "255.255.255.0",
+                "nic_tag": "external",
+                "interface": "net1",
+                "vlan_id": 0,
+                "gateway": "10.254.254.1"
+            }
+        ]
     }, "add_invalid_allow_unfiltered_promisc": {
         "update_nics": [
             {
@@ -66,10 +77,12 @@ var PAYLOADS = {
             "01:02:03:04:05:06",
             "02:03:04:05:06:07"
         ]
-    }, "add_nic_with_just_mac": {
+    }, "add_nic_with_minimal_properties": {
         "add_nics": [
             {
-                "mac": "01:02:03:04:05:06"
+                "mac": "01:02:03:04:05:06",
+                "ip": "dhcp",
+                "nic_tag": "admin"
             }
         ]
     }
@@ -134,6 +147,13 @@ test('add net0', function(t) {
                 t.end();
             });
         }
+    });
+});
+
+test('add net1 -- bad IP', function(t) {
+    VM.update(vm_uuid, PAYLOADS.add_net1, function (err) {
+        t.ok(err, 'failed to add nic with invalid IP: ' + (err ? err.message : ''));
+        t.end();
     });
 });
 
@@ -235,8 +255,8 @@ test('remove net0 and net1', function(t) {
     });
 });
 
-test('add NIC with just MAC', function(t) {
-    VM.update(vm_uuid, PAYLOADS.add_nic_with_just_mac, function(err) {
+test('add NIC with minimal properties', function(t) {
+    VM.update(vm_uuid, PAYLOADS.add_nic_with_minimal_properties, function(err) {
         if (err) {
             t.ok(false, 'error updating VM: ' + err.message);
             t.end();
@@ -252,7 +272,7 @@ test('add NIC with just MAC', function(t) {
                 t.ok(obj.nics.length === 1, 'VM has ' + obj.nics.length + ' nics, expected: 1');
                 nic = obj.nics[0];
                 for (prop in nic) {
-                    t.ok((['interface', 'mac'].indexOf(prop) !== -1), 'prop is expected: ' + prop);
+                    t.ok((['interface', 'mac', 'nic_tag', 'ip'].indexOf(prop) !== -1), 'prop is expected: ' + prop);
                     t.ok(nic[prop] !== 'undefined', 'prop ' + prop + ' is not undefined');
                 }
                 t.end();
@@ -395,8 +415,13 @@ function test_update_ram(ram)
                         + obj.max_physical_memory + ' expected: ' + ram);
                     t.ok((obj.max_locked_memory === Number(ram)), 'vm.max_locked_memory: '
                         + obj.max_locked_memory + ' expected: ' + ram);
-                    t.ok((obj.max_swap === Number(ram)), 'vm.max_swap: '
-                        + obj.max_swap + ' expected: ' + ram);
+                    if (ram > 256) {
+                        t.ok((obj.max_swap === Number(ram)), 'vm.max_swap: '
+                            + obj.max_swap + ' expected: ' + ram);
+                    } else {
+                        t.ok((obj.max_swap === 256), 'vm.max_swap: '
+                            + obj.max_swap + ' expected: ' + 256);
+                    }
                     t.end();
                 });
             }

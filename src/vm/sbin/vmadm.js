@@ -25,6 +25,7 @@
  *
  */
 
+var async = require('/usr/node/node_modules/async');
 var fs = require('fs');
 var VM = require('/usr/vm/node_modules/VM');
 var nopt = require('/usr/vm/node_modules/nopt');
@@ -33,13 +34,17 @@ var sprintf = require('/usr/node/node_modules/sprintf').sprintf;
 var tty = require('tty');
 var util = require('util');
 
+VM.logname = 'vmadm';
+
 // VM.DEBUG=true;
 
 var COMMANDS = [
     'start', 'boot',
     'console',
     'create',
+    'create-snapshot',
     'delete', 'destroy',
+    'delete-snapshot',
     'stop', 'halt',
     'help',
     'info',
@@ -49,6 +54,7 @@ var COMMANDS = [
     'lookup',
     'reboot',
     'receive', 'recv',
+    'rollback-snapshot',
     'send',
     'sysrq',
     'update'
@@ -72,6 +78,7 @@ var LIST_FIELDS = {
     dns_domain: {header: 'DOMAIN', width: 32},
     do_not_inventory: {header: 'DNI', width: 5},
     hostname: {header: 'HOSTNAME', width: 32},
+    image_uuid: {header: 'IMAGE_UUID', width: 36},
     ram: {header: 'RAM', width: 7},
     max_locked_memory: {header: 'MAX_LOCKED', width: 10},
     max_lwps: {header: 'MAX_LWP', width: 7},
@@ -120,8 +127,10 @@ function usage(message, code)
     out('Usage: ' + process.argv[1] + ' <command> [options]');
     out('');
     out('create [-f <filename>]');
+    out('create-snapshot <uuid> <snapname>');
     out('console <uuid>');
     out('delete <uuid>');
+    out('delete-snapshot <uuid> <snapname>');
     out('get <uuid>');
     out('info <uuid> [type,...]');
     out('install <uuid>');
@@ -129,6 +138,7 @@ function usage(message, code)
     out('lookup [-j|-1] [field=value ...]');
     out('reboot <uuid> [-F]');
     out('receive [-f <filename>]');
+    out('rollback-snapshot <uuid> <snapname>');
     out('send <uuid> [target]');
     out('start <uuid> [option=value ...]');
     out('stop <uuid> [-F]');
@@ -171,6 +181,22 @@ function validFilterKey(key)
     }
 
     return false;
+}
+
+// just rules out some confusing options that work for lookup but don't make
+// sense in list form.
+function validColumnKey(key)
+{
+    var bad_re;
+
+    // when we have a .*. we won't know which one to show
+    bad_re = new RegExp('^(disks|filesystems|nics)\.\\*\.*');
+
+    if (key.match(bad_re)) {
+        return false;
+    }
+
+    return true;
 }
 
 function getListProperties(field)
@@ -334,14 +360,17 @@ function addCommandOptions(command, opts, shorts)
 
     switch (command) {
     case 'boot':
+    case 'create-snapshot':
     case 'console':
     case 'delete':
+    case 'delete-snapshot':
     case 'destroy':
     case 'get':
     case 'help':
     case 'info':
     case 'install':
     case 'json':
+    case 'rollback-snapshot':
     case 'send':
     case 'start':
     case 'sysrq':
@@ -622,9 +651,12 @@ function main(callback)
     var key;
     var knownOpts = {};
     var order;
+    var order_list;
     var parsed;
     var shortHands = {};
+    var snapname;
     var sortby;
+    var sortby_list;
     var type;
     var types;
     var uuid;
@@ -642,11 +674,8 @@ function main(callback)
 
     // console.log("parsed =\n"+ require("util").inspect(parsed));
 
-    if (parsed.debug) {
-        VM.loglevel = 'DEBUG';
-    } else {
-        VM.loglevel = 'INFO';
-    }
+    // always set log level to debug
+    VM.loglevel = 'debug';
 
     switch (command) {
     case 'start':
@@ -747,6 +776,54 @@ function main(callback)
                 }
             });
         });
+        break;
+    case 'create-snapshot':
+        uuid = getUUID(command, parsed);
+        if (!parsed.argv.remain || parsed.argv.remain.length !== 1) {
+            usage('Wrong number of parameters to "create-snapshot"');
+        } else {
+            snapname = parsed.argv.remain[0];
+            VM.create_snapshot(uuid, snapname, {}, function (err) {
+                if (err) {
+                    callback(err);
+                } else {
+                    callback(null, 'Created snapshot ' + snapname + ' for '
+                        + uuid);
+                }
+            });
+        }
+        break;
+    case 'delete-snapshot':
+        uuid = getUUID(command, parsed);
+        if (!parsed.argv.remain || parsed.argv.remain.length !== 1) {
+            usage('Wrong number of parameters to "delete-snapshot"');
+        } else {
+            snapname = parsed.argv.remain[0];
+            VM.delete_snapshot(uuid, snapname, {}, function (err) {
+                if (err) {
+                    callback(err);
+                } else {
+                    callback(null, 'Deleted snapshot ' + snapname + ' for '
+                        + uuid);
+                }
+            });
+        }
+        break;
+    case 'rollback-snapshot':
+        uuid = getUUID(command, parsed);
+        if (!parsed.argv.remain || parsed.argv.remain.length !== 1) {
+            usage('Wrong number of parameters to "rollback-snapshot"');
+        } else {
+            snapname = parsed.argv.remain[0];
+            VM.rollback_snapshot(uuid, snapname, {}, function (err) {
+                if (err) {
+                    callback(err);
+                } else {
+                    callback(null, 'Rolled back snapshot ' + snapname + ' for '
+                        + uuid);
+                }
+            });
+        }
         break;
     case 'send':
         uuid = getUUID(command, parsed);
@@ -866,6 +943,24 @@ function main(callback)
             }
         }
 
+        order_list = order.split(',');
+        for (key in order_list) {
+            if (!validColumnKey(order_list[key])) {
+                callback(new Error('Invalid order key: "' + order_list[key]
+                    + '"'));
+                return;
+            }
+        }
+
+        sortby_list = sortby.split(',');
+        for (key in sortby_list) {
+            if (!validColumnKey(sortby_list[key])) {
+                callback(new Error('Invalid sort key: "' + sortby_list[key]
+                    + '"'));
+                return;
+            }
+        }
+
         listVM(extra, order, sortby, options, callback);
         break;
     case 'halt':
@@ -881,7 +976,7 @@ function main(callback)
             if (err) {
                 callback(err);
             } else {
-                callback(null, 'Succesfully completed ' + command + ' for '
+                callback(null, 'Successfully completed ' + command + ' for '
                     + uuid);
             }
         });
@@ -892,19 +987,57 @@ function main(callback)
     }
 }
 
+function flushLogs(callback)
+{
+    if (!VM.log) {
+        callback();
+        return;
+    }
+
+    async.forEach(VM.log.streams, function (str, cb) {
+        var returned = false;
+
+        if (!str || !str.stream) {
+            cb();
+            return;
+        }
+
+        str.stream.once('drain', function () {
+            if (!returned) {
+                cb();
+            }
+            return;
+        });
+
+        if (str.stream.write('')) {
+            returned = true;
+            cb();
+            return;
+        }
+    }, function () {
+        callback();
+        return;
+    });
+}
+
 onlyif.rootInSmartosGlobal(function (err) {
     if (err) {
         console.error('FATAL: cannot run because: ' + err);
         process.exit(2);
+        return;
     }
     main(function (e, message) {
         if (e) {
             console.error(e.message);
-            process.exit(1);
+            flushLogs(function () {
+                process.exit(1);
+            });
         }
         if (message) {
             console.error(message);
         }
-        process.exit(0);
+        flushLogs(function () {
+            process.exit(0);
+        });
     });
 });

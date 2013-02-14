@@ -135,6 +135,7 @@ network/shares/reparsed.xml	disabled
 network/shell.xml		disabled
 network/slp.xml			disabled
 network/ssh.xml			enabled
+network/vrrp.xml		disabled
 system/auditd.xml		disabled
 system/consadm.xml		disabled
 system/console-login.xml	disabled
@@ -159,6 +160,7 @@ system/idmap.xml		disabled
 system/keymap.xml		enabled
 system/logadm-upgrade.xml	enabled
 system/manifest-import.xml	enabled
+system/mdata.xml		disabled
 system/name-service-cache.xml	enabled
 system/pfexecd.xml		enabled
 system/rbac.xml			enabled

@@ -11,10 +11,10 @@ var VM = require('/usr/vm/node_modules/VM');
 var test = require('tap').test;
 var vmtest = this;
 
-var DATASETS_IP = '8.19.41.72';
+var DATASETS_IP = '165.225.154.107';
 
 exports.CURRENT_SMARTOS = '01b2c898-945f-11e1-a523-af1afbe22822';
-exports.CURRENT_UBUNTU = '56108678-1183-11e1-83c3-ff3185a5b47f';
+exports.CURRENT_UBUNTU = '71101322-43a5-11e1-8f01-cf2a3031a7f4';
 
 exports.getImage = function(t, uuid, callback)
 {
@@ -125,6 +125,7 @@ exports.on_new_vm = function(t, uuid, payload, state, fnlist, callback)
         }, function(cb) {
             VM.create(payload, function (err, obj) {
                 if (err) {
+                    state.create_err = err;
                     if (state.expect_create_failure) {
                         t.ok(true, 'failed to create VM: ' + err.message);
                         cb();
@@ -147,7 +148,7 @@ exports.on_new_vm = function(t, uuid, payload, state, fnlist, callback)
         }
     ];
 
-    if (fnlist) {
+    if (fnlist && fnlist.length > 0) {
         functions = functions.concat(fnlist);
     }
 
@@ -172,6 +173,8 @@ exports.on_new_vm = function(t, uuid, payload, state, fnlist, callback)
     });
 
     async.series(functions, function (err) {
+        var openThingies;
+
         if (err) {
             t.ok(false, err.message);
         }
@@ -179,7 +182,15 @@ exports.on_new_vm = function(t, uuid, payload, state, fnlist, callback)
             // up to caller to call t.end!
             return callback();
         } else {
-             t.end();
+            t.end();
+
+            /*
+
+            // Helpful bit from Isaac that tells what's still open.
+            openThingies = process._getActiveHandles();
+            console.dir(openThingies);
+
+            */
         }
     });
 };

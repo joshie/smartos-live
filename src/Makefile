@@ -17,6 +17,8 @@ CSTYLE =	$(ROOT)/tools/cstyle
 #
 JSSTYLE_OPTS = -o indent=4,strict-indent=1,doxygen,unparenthesized-return=0,continuation-at-front=1,leading-right-paren-ok=1
 
+JSSTYLE_OLDSKOOL_OPTS =
+
 #
 # Installation configuration.  Note that DESTDIR in particular is also
 # assumed to contain various build tools, headers, libraries, and other
@@ -64,6 +66,11 @@ JS_CHECK_TARGETS=\
 	img/node_modules/*.js \
 	img/sbin/imgadm
 
+JS_CHECK_OLDSKOOL_TARGETS = \
+	disklayout.js \
+	mkzpool.js \
+	node_modules/disklayout.js
+
 # These files will get run through cstyle on 'make check'
 C_CHECK_TARGETS=\
 	qemu-exec.c \
@@ -107,15 +114,46 @@ $(KSTAT.NODE) :	LDFLAGS +=	$(NODE_LDFLAGS)
 $(KSTAT.NODE) :	LIBS +=		-lkstat
 
 #
-# Likewise the syslog add-on.
+# The dtrace-provider add-on uses a combination of C, assembly and C++ files in
+# multiple directories.
 #
-SYSLOG_OBJDIR =	node-syslog/build/Release
-SYSLOG.NODE =	$(SYSLOG_OBJDIR)/syslog.node
+DTRACE_PROVIDER_OBJDIR =	node-dtrace-provider/build/Release
+DTRACE_PROVIDER_SRCDIR =	node-dtrace-provider
+DTRACE_PROVIDER.NODE =		$(DTRACE_PROVIDER_OBJDIR)/dtrace-provider.node
 
-$(SYSLOG.NODE) :	WARN_FLAGS +=	-Wno-unused
-$(SYSLOG.NODE) :	CPPFLAGS +=	$(NODE_CPPFLAGS)
-$(SYSLOG.NODE) :	CXXFLAGS +=	$(NODE_CFLAGS)
-$(SYSLOG.NODE) :	LDFLAGS +=	$(NODE_LDFLAGS)
+DTRACE_PROVIDER_SRCS += \
+			dtrace_probe.cc \
+			dtrace_provider.cc
+
+DTRACE_PROVIDER_LIBUSDT_SRCS += \
+			libusdt/usdt.c \
+			libusdt/usdt_dof_file.c \
+			libusdt/usdt_probe.c \
+			libusdt/usdt_dof.c \
+			libusdt/usdt_dof_sections.c
+
+DTRACE_PROVIDER_LIBUSDT_ASM_SRCS += \
+			libusdt/usdt_tracepoints_i386.s
+
+DTRACE_PROVIDER_HDRS += \
+			node-dtrace-provider/dtrace_provider.h \
+			node-dtrace-provider/libusdt/usdt_internal.h \
+			node-dtrace-provider/libusdt/usdt.h
+
+DTRACE_PROVIDER_OBJS += \
+			$(DTRACE_PROVIDER_SRCS:%.cc=$(DTRACE_PROVIDER_OBJDIR)/%.o) \
+			$(DTRACE_PROVIDER_LIBUSDT_SRCS:%.c=$(DTRACE_PROVIDER_OBJDIR)/%.o) \
+			$(DTRACE_PROVIDER_LIBUSDT_ASM_SRCS:%.s=$(DTRACE_PROVIDER_OBJDIR)/%.o)
+
+$(DTRACE_PROVIDER.NODE) :	WARN_FLAGS +=	-Wno-unused -Wno-sign-compare
+$(DTRACE_PROVIDER.NODE) :	CFLAGS +=	$(NODE_CFLAGS)
+$(DTRACE_PROVIDER.NODE) :	CPPFLAGS +=	\
+					$(NODE_CPPFLAGS) \
+					-Inode-dtrace-provider/libusdt
+$(DTRACE_PROVIDER.NODE) :	CXXFLAGS +=	$(NODE_CFLAGS)
+$(DTRACE_PROVIDER.NODE) :	LDFLAGS +=	$(NODE_LDFLAGS)
+
+CLEANFILES +=	$(DTRACE_PROVIDER.NODE) $(DTRACE_PROVIDER_OBJS)
 
 #
 # The sqlite3 add-on uses a combination of C + C++ files in multiple
@@ -237,14 +275,17 @@ $(ZUTIL_BINDINGS.NODE) :	LIBS +=		-lzonecfg
 TARGETS = \
 	bootparams \
 	diskinfo \
+	disklayout \
 	disklist \
 	disk_size \
+	mkzpool \
 	removable_disk \
 	vmunbundle \
 	zfs_recv \
 	zfs_send \
 	zoneevent \
 	$(EXPAT.NODE) \
+	$(DTRACE_PROVIDER.NODE) \
 	$(KSTAT.NODE) \
 	$(SYSLOG.NODE) \
 	$(SQLITE3_BINDINGS.NODE) \
@@ -269,7 +310,6 @@ install: all
 	mkdir -m 0755 -p $(PREFIX_NODE)/node_modules
 	cp -Pr node_modules/* $(PREFIX_NODE)/node_modules
 	cp $(KSTAT.NODE) $(PREFIX_NODE)/node_modules/
-	cp $(SYSLOG.NODE) $(PREFIX_NODE)/node_modules/syslog.node
 	rm -rf $(DESTDIR)/usr/vm
 	cp -PR vm $(DESTDIR)/usr/
 	mkdir -m 0755 -p $(DESTDIR)/usr/vm/node_modules
@@ -296,6 +336,10 @@ install: all
 	cp $(ZUTIL_BINDINGS.NODE) \
 	    $(PREFIX_NODE)/node_modules/zutil/build/Release
 	cp $(EXPAT.NODE) $(PREFIX_NODE)/node_modules/expat_binding.node
+	cp $(DTRACE_PROVIDER.NODE) $(PREFIX_NODE)/node_modules/dtrace-provider.node
+	sed -e "s|require('./build.*DTraceProviderBindings')|require('/usr/node/node_modules/dtrace-provider.node')|" \
+	    < $(DTRACE_PROVIDER_SRCDIR)/dtrace-provider.js \
+	    > $(PREFIX_NODE)/node_modules/dtrace-provider.js
 	sed -e "s|var expat.*;|var expat = require('./expat_binding');|" \
 	    < node-expat/lib/node-expat.js \
 	    > $(PREFIX_NODE)/node_modules/node-expat.js
@@ -313,8 +357,23 @@ install: all
 	mv $(DESTDIR)/usr/vm/sbin/add-userscript.js \
 	    $(DESTDIR)/usr/vm/sbin/add-userscript
 	mv $(DESTDIR)/usr/vm/sbin/metadata.js $(DESTDIR)/usr/vm/sbin/metadata
+	mkdir -p $(DESTDIR)/usr/share/man/man1
+	sed -e "s|require('dtrace-provider')|require('/usr/node/node_modules/dtrace-provider')|" \
+	    < node-bunyan/lib/bunyan.js \
+	    > $(PREFIX_NODE)/node_modules/bunyan.js
+	cp node-bunyan/docs/bunyan.1 $(DESTDIR)/usr/share/man/man1/bunyan.1
+	mkdir -p $(DESTDIR)/usr/bin
+	sed -e 's|^#!/usr/bin/env node.*$$|#!/usr/node/bin/node|' \
+	    < node-bunyan/bin/bunyan \
+	    > $(DESTDIR)/usr/bin/bunyan
 	cp -PR img $(DESTDIR)/usr/
 	mkdir -m 0755 -p $(DESTDIR)/var/db/imgadm
+	rm -rf $(DESTDIR)/usr/fw
+	mkdir -m 0755 -p $(DESTDIR)/usr/fw
+	cp -PR fw/etc $(DESTDIR)/usr/fw/
+	cp -PR fw/lib $(DESTDIR)/usr/fw/
+	cp -PR fw/node_modules $(DESTDIR)/usr/fw/
+	cp -PR fw/sbin $(DESTDIR)/usr/fw/
 
 check: $(JSLINT)
 	@echo "==> Running cstyle..."
@@ -326,12 +385,17 @@ check: $(JSLINT)
 	@printf "\nC files ok!\n"
 	@printf "\n==> Running JavaScriptLint...\n"
 	@$(JSLINT) --nologo --conf=$(ROOT)/tools/jsl.node.conf \
-	    $(JS_CHECK_TARGETS)
+	    $(JS_CHECK_TARGETS) $(JS_CHECK_OLDSKOOL_TARGETS)
 	@printf "\n==> Running jsstyle...\n"
 	@# jsstyle doesn't echo as it goes so we add an echo to each line below
-	@(for file in $(JS_CHECK_TARGETS); do \
+	(for file in $(JS_CHECK_TARGETS); do \
 		echo $(PWD)/$$file; \
 		$(JSSTYLE) $(JSSTYLE_OPTS) $$file; \
+		[[ $$? == "0" ]] || exit 1; \
+	done)
+	(for file in $(JS_CHECK_OLDSKOOL_TARGETS); do \
+		echo $(PWD)/$$file; \
+		$(JSSTYLE) $(JSSTYLE_OLDSKOOL_OPTS) $$file; \
 		[[ $$? == "0" ]] || exit 1; \
 	done)
 	@printf "\nJS style ok!\n"
@@ -358,9 +422,17 @@ include Makefile.targ
 # Custom rules for building our various real targets follow.  Generic rules
 # belong in Makefile.targ.
 #
-disklist:
+disklayout: disklayout.js
+	cp disklayout.js disklayout
+	chmod 0755 disklayout
+
+disklist: disklist.sh
 	cp disklist.sh disklist
 	chmod 0755 disklist
+
+mkzpool: mkzpool.js
+	cp mkzpool.js mkzpool
+	chmod 0755 mkzpool
 
 sysinfo:
 	touch sysinfo
@@ -373,12 +445,30 @@ $(EXPAT.NODE): node-expat/node-expat.cc
 	@mkdir -p $(EXPAT_OBJDIR)
 	$(GXX) $(CPPFLAGS) $(CXXFLAGS) $(LDFLAGS) -o $@ $< $(LIBS)
 
+#
+# The next two are used to build libusdt files into
+# $(DTRACE_PROVIDER_OBJDIR)/libusdt/*.o, instead of building libusdt.a
+#
+$(DTRACE_PROVIDER_OBJDIR)/%.o: $(DTRACE_PROVIDER_SRCDIR)/%.c \
+	    $(DTRACE_PROVIDER_HDRS)
+	@mkdir -p $(DTRACE_PROVIDER_OBJDIR)/libusdt
+	$(GCC) $(CPPFLAGS) $(CFLAGS) -o $@ -c $<
+
+$(DTRACE_PROVIDER_OBJDIR)/%.o: $(DTRACE_PROVIDER_SRCDIR)/%.s
+	@mkdir -p $(DTRACE_PROVIDER_OBJDIR)/libusdt
+	$(GCC) $(CPPFLAGS) $(CFLAGS) -o $@ -c $<
+
+$(DTRACE_PROVIDER_OBJDIR)/%.o: $(DTRACE_PROVIDER_SRCDIR)/%.cc \
+	    $(DTRACE_PROVIDER_HDRS)
+	@mkdir -p $(DTRACE_PROVIDER_OBJDIR)
+	$(GXX) $(CPPFLAGS) $(CXXFLAGS) $(LDFLAGS) -o $@ -c $<
+
+$(DTRACE_PROVIDER.NODE): $(DTRACE_PROVIDER_OBJS)
+	@mkdir -p $(DTRACE_PROVIDER_OBJDIR)
+	$(GXX) $(CPPFLAGS) $(CXXFLAGS) $(LDFLAGS) -o $@ $(DTRACE_PROVIDER_OBJS) $(LIBS)
+
 $(KSTAT.NODE): node-kstat/kstat.cc
 	@mkdir -p $(KSTAT_OBJDIR)
-	$(GXX) $(CPPFLAGS) $(CXXFLAGS) $(LDFLAGS) -o $@ $< $(LIBS)
-
-$(SYSLOG.NODE): node-syslog/syslog.cc
-	@mkdir -p $(SYSLOG_OBJDIR)
 	$(GXX) $(CPPFLAGS) $(CXXFLAGS) $(LDFLAGS) -o $@ $< $(LIBS)
 
 $(SQLITE3_OBJDIR)/%.o: $(SQLITE3_SRCDIR)/%.cc $(SQLITE3_HDRS)

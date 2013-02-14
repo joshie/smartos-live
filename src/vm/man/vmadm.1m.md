@@ -30,6 +30,23 @@ tab-complete UUIDs rather than having to type them out for every command.
         See the 'PROPERTIES' or 'EXAMPLES' sections below for details on what
         to put in the JSON payload.
 
+      create-snapshot <uuid> <snapname>
+
+        Support for snapshots is currently experimental. It only works for OS
+        VMS which also have no additional datasets.
+
+        The <snapname> parameter specifies the name of the snapshot to take
+        of the specified VM. The snapname must be 64 characters or less and
+        must only contain alphanumeric characters and characters in the set
+        [-_.:%] to comply with ZFS restrictions.
+
+        You can use delete-snapshot or rollback-snapshot in the future on a
+        snapshot you've created with create-snapshot, so long as that snapshot
+        still exists.
+
+        See the 'SNAPSHOTS' section below for some more details on how to use
+        these snapshots, and their restrictions.
+
       console <uuid>
 
         Connect to the text console for a running VM. For OS VMs, this will be
@@ -49,6 +66,19 @@ tab-complete UUIDs rather than having to type them out for every command.
 
         Note: this command is not interactive, take care to delete the right
         VM.
+
+      delete-snapshot <uuid> <snapname>
+
+        Support for snapshots is currently experimental. It only works for OS
+        VMS which also have no additional datasets.
+
+        This command deletes the ZFS snapshot that exists with the name
+        <snapname> from the VM with the specified uuid. You cannot undo this
+        operation and it will no longer be possible to rollback to the specified
+        snapshot.
+
+        See the 'SNAPSHOTS' section below for some more details on how to use
+        these snapshots, and their restrictions.
 
       get <uuid>
 
@@ -189,6 +219,26 @@ tab-complete UUIDs rather than having to type them out for every command.
         reboot you can add the '-F' parameter to do a forced reboot. This
         reboot will be much faster but will not necessarily give the VM any
         time to shut down its processes.
+
+      rollback-snapshot <uuid> <snapname>
+
+        Support for snapshots is currently experimental. It only works for OS
+        VMS which also have no additional datasets.
+
+        This command rolls the dataset backing the the VM with the specified
+        uuid back to its state at the point when the snapshot with snapname was
+        taken. You cannot undo this except by rolling back to an even older
+        snapshot if one exists.
+
+        IMPORTANT: when you rollback to a snapshot, all other snapshots newer
+        than the one you're rolling back to will be deleted. It will no longer
+        be possible to rollback to a snapshot newer than <snapname> for this VM.
+        Also note: your VM will be stopped if it is running when you start a
+        rollback-snapshot and will be booted after the snapshot has been
+        restored.
+
+        See the 'SNAPSHOTS' section below for some more details on how to use
+        these snapshots, and their restrictions.
 
       start <uuid> [option=value ...]
 
@@ -345,6 +395,30 @@ tab-complete UUIDs rather than having to type them out for every command.
         restarted. Other properties will require a reboot in order to take
         effect.
 
+## SNAPSHOTS
+
+    Snapshots are currently only implemented for OS VMs, and only for those
+    that do not utilize delegated datasets or any other datasets other than
+    the zoneroot dataset.
+
+    When you create a snapshot with create-snapshot, it will create a ZFS
+    snapshot of that dataset with the name dataset@vmsnap-<snapname> and the
+    .snapshots member of VM objects returned by things like vmadm get will
+    only include those snapshots that have been created using this pattern.
+
+    That allows vmadm to distinguish between snapshots it has taken and
+    snapshots that could have been taken using other tools.
+
+    To delete a snapshot you can use the delete-snapshot command. That will
+    destroy the snapshot in ZFS and it will automatically be removed from the
+    machine's snapshot list. It will no longer be possible to rollback to it.
+
+    To rollback a VM to its state at the time of a previous snapshot, you can
+    use the rollback-snapshot command. This will stop the VM rollback the
+    zoneroot dataset to the specified snapshot and start the VM again.
+    IMPORTANT: rollback-snapshot will automatically delete all snapshots newer
+    than the one you're rolling back to. This cannot be undone.
+
 ## PROPERTIES
 
     Every VM has a number of properties. The properties for a VM can be listed
@@ -424,11 +498,11 @@ tab-complete UUIDs rather than having to type them out for every command.
 
     brand:
 
-        This will be one of 'joyent' or 'joyent-minimal' for OS virtualization
-        and 'kvm' for full hardware virtualization. This is a required value
-        for VM creation.
+        This will be one of 'joyent', 'joyent-minimal' or 'sngl' for OS
+        virtualization and 'kvm' for full hardware virtualization. This is a
+        required value for VM creation.
 
-        type: string (joyent|joyent-minimal|kvm)
+        type: string (joyent|joyent-minimal|kvm|sngl)
         vmtype: OS,KVM
         listable: yes
         create: yes
@@ -904,14 +978,30 @@ tab-complete UUIDs rather than having to type them out for every command.
     max_swap:
 
         The maximum amount of virtual memory the VM is allowed to use.  This
-        cannot be lower than max_physical_memory.
+        cannot be lower than max_physical_memory, nor can it be lower than 256.
 
         type: integer (number of MiB)
         vmtype: OS,KVM
         listable: yes
         create: yes
         update: yes (live update)
-        default: value of max_physical_memory
+        default: value of max_physical_memory or 256, whichever is higher.
+
+    mdata_exec_timeout:
+
+        For OS VMs this parameter adjusts the timeout on the start method of
+        the svc:/smartdc/mdata:execute service running in the zone. This is the
+        service which runs user-script scripts.
+
+        This parameter only makes sense when creating a VM and is ignored
+        in other cases.
+
+        type: integer (0 for unlimited, >0 number of seconds)
+        vmtype: OS
+        listable: no
+        create: yes
+        update: no
+        default: 300
 
     nics:
 
@@ -1119,6 +1209,29 @@ tab-complete UUIDs rather than having to type them out for every command.
         update: yes
         default: 0
 
+    nics.*.vrrp_primary_ip:
+
+        The source IP that will be used to transmit the VRRP keepalive packets
+        for this nic.  The IP must be the IP address of one of the other non-
+        VRRP nics in this VM.
+
+        type: string (IPv4 address)
+        vmtype: OS
+        listable: yes (see above)
+        create: yes
+        update: yes
+
+    nics.*.vrrp_vrid:
+
+        The VRRP Virtual Router ID for this nic.  This sets the MAC address
+        of this nic to one based on the VRID.
+
+        type: integer (0-255)
+        vmtype: OS
+        listable: yes (see above)
+        create: yes
+        update: yes
+
     nic_driver:
 
         This specifies the default values for nics.*.model for NICs attached to
@@ -1261,6 +1374,18 @@ tab-complete UUIDs rather than having to type them out for every command.
         create: yes
         update: yes (but unused after create for OS VMs)
 
+    snapshots (EXPERIMENTAL):
+
+        For OS VMs, this will display a list of snapshots from which you can
+        restore the root dataset for your VM.  Currently this is only supported
+        when your VM does not have any delegated datasets.
+
+        type: array
+        vmtype: OS
+        listable: no
+        create: no (but you can use create-snapshot)
+        update: no (but you can use rollback-snapshot and delete-snapshot)
+
     spice_opts (EXPERIMENTAL):
 
         This property allows you to add additional -spice options when you are
@@ -1328,7 +1453,7 @@ tab-complete UUIDs rather than having to type them out for every command.
         listable: yes
         create: yes
         update: yes
-        default: 256
+        default: max_swap
 
     transition_expire:
 
@@ -1350,9 +1475,11 @@ tab-complete UUIDs rather than having to type them out for every command.
         When a KVM VM is in transition from running to either 'off' (in the
         case of stop) or 'start' (in the case of reboot), the transition_to
         field will be set to indicate which state the VM is transitioning to.
+        Additionally when a VM is provisioning you may see this with a value
+        of 'running'.
 
-        type: string value, one of: ['stopped', 'start']
-        vmtype: KVM
+        type: string value, one of: ['stopped', 'start', 'running']
+        vmtype: OS,KVM
         listable: no
         create: no
         update: no
@@ -1360,7 +1487,7 @@ tab-complete UUIDs rather than having to type them out for every command.
     type:
 
         This is a virtual field and cannot be updated. It will be 'OS' when the
-        brand=='joyent*' and 'KVM' when the brand=='kvm'.
+        (brand == 'joyent*' || brand == 'sngl') and 'KVM' when the brand=='kvm'.
 
         type: string value, one of: ['OS', 'KVM']
         vmtype: OS,KVM

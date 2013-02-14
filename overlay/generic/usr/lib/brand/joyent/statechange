@@ -19,7 +19,7 @@
 #
 # CDDL HEADER END
 #
-# Copyright 2012 Joyent, Inc.  All rights reserved.
+# Copyright 2013 Joyent, Inc.  All rights reserved.
 # Use is subject to license terms.
 #
 
@@ -140,14 +140,14 @@ setup_net()
 		blocked_outgoing_ports=$(eval \
 		    echo \$_ZONECFG_net_${nic}_blocked_outgoing_ports)
 		zone_ip=$(eval echo \$_ZONECFG_net_${nic}_ip)
-		zone_ip6=$(eval echo \$_ZONECFG_net_${nic}_ip6)
 		allow_dhcp_spoof=$(get_boolean_nic_property ${nic} allow_dhcp_spoofing)
 		allow_ip_spoof=$(get_boolean_nic_property ${nic} allow_ip_spoofing)
 		allow_mac_spoof=$(get_boolean_nic_property ${nic} allow_mac_spoofing)
 		allow_restricted_traffic=$(get_boolean_nic_property ${nic} \
 		    allow_restricted_traffic)
-		allowed_ips=$(eval echo ${zone_ip// } ${zone_ip6// } \
-		    | sed 's| |,|g;s|/[0-9]*||g')
+		vrid=$(eval echo \$_ZONECFG_net_${nic}_vrrp_vrid)
+		vrrp_primary_ip=$(eval \
+		    echo \$_ZONECFG_net_${nic}_vrrp_primary_ip)
 
 		# If address set, must be a shared stack zone
 		[[ -n $address ]] && exit 0
@@ -188,6 +188,12 @@ setup_net()
 		#
 
 		opt_str="-p zone=$ZONENAME"
+		if [[ -n $vrid ]]; then
+			# MAC addresses for VRRP vnics are determined by the VRID
+			mac_addr="vrrp"
+			opt_str="$opt_str -V $vrid -A inet"
+		fi
+
 		[[ -n $mac_addr ]] && opt_str="$opt_str -m $mac_addr"
 
 		[[ -n $vlan_id && $vlan_id != 0 ]] && \
@@ -287,9 +293,29 @@ setup_net()
 			fi
 		fi
 
-		if [[ -n "${allowed_ips}" ]] && [[ $allow_ip_spoof != "true" ]] && \
-			    [[ "${zone_ip}" != "dhcp" ]] && [[ "${zone_ip6}" != "dhcp" ]] && \
-			    [[ "${zone_ip6}" != "auto" ]]; then
+		# Get the static IP for the vnic from the zone config file, but only
+		# if there's not an IP from the zone properties
+		hostname_file="$ZONEPATH/root/etc/hostname.$nic"
+		if [[ -z "${zone_ip}" ]] && [ -e $hostname_file ]; then
+			zone_ip=`nawk \
+			    '{if ($1 ~ /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)
+			    print $1}' $hostname_file`
+			/usr/sbin/zonecfg -z $ZONENAME "select net physical=${nic}; add property (name=ip, value=\"$zone_ip\"); end; exit"
+			if (( $? != 0 )); then
+				echo "error updating zone config ${nic} ${zone_ip}"
+				logger -p daemon.err "zone $ZONENAME error updating " \
+				    "zone config ${nic} ${zone_ip}"
+				exit 1
+			fi
+		fi
+
+		if [[ -n "${zone_ip}" ]] && [[ $allow_ip_spoof != "true" ]] && \
+			    [[ "${zone_ip}" != "dhcp" ]] && [[ "${zone_ip}" != "dhcp6" ]] && \
+			    [[ "${zone_ip}" != "auto6" ]]; then
+			allowed_ips="${zone_ip}"
+			[[ -n $vrrp_primary_ip ]] && \
+			    allowed_ips="${allowed_ips},${vrrp_primary_ip}"
+
 			dladm set-linkprop -t -z $ZONENAME \
 			    -p "allowed-ips=${allowed_ips}" ${nic}
 			if (( $? != 0 )); then
@@ -348,6 +374,46 @@ setup_net()
 
 		unlock_file
 	done
+}
+
+#
+# Log a message, then exit
+#
+log_and_exit()
+{
+	echo "$1"
+	logger -p daemon.err "zone $ZONENAME $1"
+	exit 1
+}
+
+#
+# Set up the firewall for the zone.
+#
+setup_fw()
+{
+	ipf_conf=$ZONEPATH/config/ipf.conf
+	if [ -e $ipf_conf ]; then
+		echo "starting firewall ($ipf_conf)"
+		/usr/sbin/ipf -E $ZONENAME
+		if (( $? != 0 )); then
+			log_and_exit "error enabling ipfilter"
+		fi
+
+		/usr/sbin/ipf -Fa $ZONENAME
+		if (( $? != 0 )); then
+			log_and_exit "error flushing ipfilter"
+		fi
+
+		/usr/sbin/ipf -f $ipf_conf $ZONENAME
+		if (( $? != 0 )); then
+			log_and_exit "error loading ipfilter config"
+		fi
+
+		/usr/sbin/ipf -y $ZONENAME
+		if (( $? != 0 )); then
+			log_and_exit "error syncing ipfilter interfaces"
+		fi
+	fi
 }
 
 #
@@ -484,7 +550,7 @@ cleanup_net()
 	done
 }
 
-kill_gz_sockholder()
+id_gz_sockholder()
 {
 	echo "searching for GZ process holding socket $1"
 	logger -p daemon.err "zone $ZONENAME " \
@@ -499,11 +565,9 @@ kill_gz_sockholder()
 
 	[ -z "$pid" ] && return
 
-	echo "killing GZ process $pid holding socket $1"
-	logger -p daemon.err "zone $ZONENAME " \
-	    "killing GZ process $pid holding socket $1"
-
-	kill -9 $pid
+	echo "Error: GZ process $pid holding socket $1 blocking shutdown"
+	logger -p daemon.err "Error: zone $ZONENAME:" \
+	    "GZ process $pid holding socket $1 blocking shutdown"
 }
 
 # zonadmd unable to unmount the given path, try to cleanup so unmount can
@@ -511,16 +575,39 @@ kill_gz_sockholder()
 cleanup_mount()
 {
 	echo "attempting to cleanup mount $1"
-	logger -p daemon.err "zone $ZONENAME " \
-	    "attempting to cleanup mount $1"
+	logger -p daemon.err "zone $ZONENAME attempting to cleanup mount $1"
 
-	cnt=`fuser -c $1 2>/dev/null | wc -w`
-	if [ $cnt -gt 0 ]; then
-		echo "trying to kill GZ processes under $1"
-		logger -p daemon.err "zone $ZONENAME " \
-		    "trying to kill GZ processes under $1"
-		fuser -ck $1
+	fnd_procs=0
+	for i in `fuser -c $1 2>/dev/null`
+	do
+		fnd_procs=1
 
+		pty=`ps -otty -p $i | \
+		    nawk '{if ($1 != "TT" && $1 != "?") print $0}'`
+
+		if [ -n "$pty" ]; then
+			echo "shell process $i blocking zone" \
+			    "$ZONENAME shutdown, killing the process" | wall
+			echo "killing GZ user shell $i under $1"
+			logger -p daemon.err "zone $ZONENAME:" \
+			    "killing GZ user shell $i under $1"
+			kill -9 $i
+		else
+			echo "Error: GZ process $i under $1 blocking shutdown"
+			logger -p daemon.err "Error: zone $ZONENAME:" \
+			    "GZ process $i under $1 blocking shutdown"
+
+			local args="pargs: `pargs $i`"
+			echo "$args"
+			logger -p daemon.err "$args"
+
+			local tree="ptree: `ptree $i`"
+			echo "$tree"
+			logger -p daemon.err "$tree"
+		fi
+	done
+
+	if [ $fnd_procs -eq 1 ]; then
 		# Exit out to give the zoneadmd umount a chance to suceed now.
 		# Zoneadmd will give us another shot if it still can't umount.
 		sleep 1
@@ -532,20 +619,20 @@ cleanup_mount()
 	# zone's root. For example, a zone with its root at /zones/foo/root and
 	# an open socket as /zones/foo/root/var/run/x will show up in a pfiles
 	# search as /var/run/x. This is a problem since we have no way to
-	# narrow down which process to kill.
+	# narrow down which process is the culprit.
 	#
 	# Because the socket doesn't have enough information for us to tie to
-	# the specific GZ process, we hardcode to kill things we know will open
+	# the specific GZ process, we hardcode to id things we know will open
 	# sockets into the zone:
 	#    /var/run/smartdc/metadata.sock
 	#    /var/run/.smartdc-amon.sock
 
 	ZVR=$ZONEPATH/root/var/run
 	[ -S $ZVR/smartdc/metadata.sock ] &&
-	    kill_gz_sockholder /var/run/smartdc/metadata.sock
+	    id_gz_sockholder /var/run/smartdc/metadata.sock
 
 	[ -S $ZVR/.smartdc-amon.sock ] &&
-	    kill_gz_sockholder /var/run/.smartdc-amon.sock
+	    id_gz_sockholder /var/run/.smartdc-amon.sock
 }
 
 #
@@ -562,6 +649,7 @@ load_sdc_config
 if [[ "$subcommand" == "post" && $cmd == 0 ]]; then
 	setup_snapshots
 	setup_net
+	setup_fw
 fi
 
 # We can't set a rctl until we have a process in the zone to grab

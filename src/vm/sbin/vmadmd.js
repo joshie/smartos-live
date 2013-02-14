@@ -26,6 +26,7 @@
  */
 
 var async = require('/usr/node/node_modules/async');
+var bunyan = require('/usr/node/node_modules/bunyan');
 var cp = require('child_process');
 var consts = require('constants');
 var events = require('events');
@@ -45,21 +46,26 @@ var util = require('util');
 var VMADMD_PORT = 8080;
 var VMADMD_AUTOBOOT_FILE = '/tmp/.autoboot_vmadmd';
 
+var PROV_WAIT = {};
 var SDC = {};
 var SPICE = {};
 var TIMER = {};
 var VNC = {};
 
+
+// Global bunyan logger object for use here in vmadmd
+var log;
+
 function sysinfo(callback)
 {
-    VM.log('DEBUG', '/usr/bin/sysinfo');
+    log.debug('/usr/bin/sysinfo');
     execFile('/usr/bin/sysinfo', [], function (error, stdout, stderr) {
         var obj;
         if (error) {
             callback(new Error(stderr.toString()));
         } else {
             obj = JSON.parse(stdout.toString());
-            VM.log('DEBUG', 'sysinfo:\n' + JSON.stringify(obj, null, 2));
+            log.debug('sysinfo:\n' + JSON.stringify(obj, null, 2));
             callback(null, obj);
         }
     });
@@ -70,25 +76,25 @@ function setRemoteDisplayPassword(vmobj, protocol, password)
     var q;
     var socket;
 
-    q = new Qmp(VM.log);
+    q = new Qmp(log);
 
     socket = vmobj.zonepath + '/root/tmp/vm.qmp';
 
-    VM.log('DEBUG', 'setting "' + protocol + '" password to "' + password
+    log.debug('setting "' + protocol + '" password to "' + password
         + '"');
 
     q.connect(socket, function (err) {
         if (err) {
-            VM.log('WARN', 'Warning: ' + protocol + ' password-set error: '
-                + err);
+            log.warn(err, 'Warning: ' + protocol + ' password-set error: '
+                + err.message);
         } else {
             q.command('set_password', {'protocol': protocol,
                 'password': password}, function (e, result) {
 
                 if (e) {
-                    VM.log('WARN', 'failed to set password for ' + protocol, e);
+                    log.warn('failed to set password for ' + protocol, e);
                 } else {
-                    VM.log('DEBUG', 'result: '
+                    log.debug('result: '
                         + JSON.stringify(result));
                     q.disconnect();
                 }
@@ -110,12 +116,6 @@ function spawnRemoteDisplay(vmobj)
         zonepath = '/zones/' + vmobj.uuid;
     }
 
-    if (vmobj.state !== 'running' && vmobj.zone_state !== 'running') {
-        VM.log('DEBUG', 'skipping ' + protocol + ' setup for non-running VM '
-            + vmobj.uuid);
-        return;
-    }
-
     // We need to work out which protocol to use since only one will work
     // (effectively) at any given time. If a spice_port is set then we will use
     // that, otherwise we default back to VNC.
@@ -133,8 +133,14 @@ function spawnRemoteDisplay(vmobj)
         sockpath = '/root/tmp/vm.vnc';
     }
 
+    if (vmobj.state !== 'running' && vmobj.zone_state !== 'running') {
+        log.debug('skipping ' + protocol + ' setup for non-running VM '
+            + vmobj.uuid);
+        return;
+    }
+
     if (port === -1) {
-        VM.log('INFO', protocol + ' listener disabled (port === -1) for VM '
+        log.info(protocol + ' listener disabled (port === -1) for VM '
             + vmobj.uuid);
         return;
     }
@@ -147,24 +153,24 @@ function spawnRemoteDisplay(vmobj)
 
         remote_address = '[' + c.remoteAddress + ']:' + c.remotePort;
         c.on('close', function (had_error) {
-            VM.log('INFO', protocol + ' connection ended from '
+            log.info(protocol + ' connection ended from '
                 + remote_address);
         });
 
         dpy.on('error', function () {
-            VM.log('WARN', 'Warning: ' + protocol + ' socket error: '
+            log.warn('Warning: ' + protocol + ' socket error: '
                 + JSON.stringify(arguments));
         });
 
         c.on('error', function () {
-            VM.log('WARN', 'Warning: ' + protocol + ' net socket error: '
+            log.warn('Warning: ' + protocol + ' net socket error: '
                 + JSON.stringify(arguments));
         });
 
         dpy.connect(path.join(zonepath, sockpath));
     });
 
-    VM.log('INFO', 'spawning ' + protocol + ' listener for ' + vmobj.uuid
+    log.info('spawning ' + protocol + ' listener for ' + vmobj.uuid
         + ' on ' + SDC.sysinfo.admin_ip);
 
     // Before we start the listener, set the password if needed.
@@ -184,7 +190,7 @@ function spawnRemoteDisplay(vmobj)
     }
 
     server.on('connection', function (sock) {
-        VM.log('INFO', protocol + ' connection started from ['
+        log.info(protocol + ' connection started from ['
             + sock.remoteAddress + ']:' + sock.remotePort);
     });
 
@@ -203,7 +209,7 @@ function spawnRemoteDisplay(vmobj)
 
                 VNC[vmobj.uuid].password = vmobj.vnc_password;
             }
-            VM.log('DEBUG', 'VNC details for ' + vmobj.uuid + ': '
+            log.debug('VNC details for ' + vmobj.uuid + ': '
                 + util.inspect(VNC[vmobj.uuid]));
         } else if (protocol == 'spice') {
             SPICE[vmobj.uuid] = {'host': SDC.sysinfo.admin_ip,
@@ -219,7 +225,7 @@ function spawnRemoteDisplay(vmobj)
                 SPICE[vmobj.uuid].spice_opts = vmobj.spice_opts;
             }
 
-            VM.log('DEBUG', 'SPICE details for ' + vmobj.uuid + ': '
+            log.debug('SPICE details for ' + vmobj.uuid + ': '
                 + util.inspect(SPICE[vmobj.uuid]));
         }
     });
@@ -245,7 +251,7 @@ function clearRemoteDisplay(uuid)
 
 function reloadRemoteDisplay(vmobj)
 {
-    VM.log('INFO', 'reloading remote display for ' + vmobj.uuid);
+    log.info('reloading remote display for ' + vmobj.uuid);
     clearRemoteDisplay(vmobj.uuid);
     spawnRemoteDisplay(vmobj);
 }
@@ -267,7 +273,7 @@ function clearVM(uuid)
 // loads the system configuration
 function loadConfig(callback)
 {
-    VM.log('DEBUG', 'loadConfig()');
+    log.debug('loadConfig()');
 
     sysinfo(function (error, s) {
         var nic, nics;
@@ -283,7 +289,7 @@ function loadConfig(callback)
                 if (nics.hasOwnProperty(nic)) {
                     if (nics[nic]['NIC Names'].indexOf('admin') !== -1) {
                         SDC.sysinfo.admin_ip = nics[nic].ip4addr;
-                        VM.log('DEBUG', 'found admin_ip: '
+                        log.debug('found admin_ip: '
                             + SDC.sysinfo.admin_ip);
                     }
                 }
@@ -294,61 +300,197 @@ function loadConfig(callback)
     });
 }
 
-function updateZoneStatus(ev)
+/*
+ * This calls cb when either the VM has finished provisioning or there was an
+ * urecoverable error.
+ *
+ * cb() will be called with:
+ *
+ *  (err) -- an error object when we can't continue
+ *  (null, 'success') -- when the provision succeeded
+ *  (null, 'failure') -- when the provision failed or timed out
+ *
+ * NOTE:
+ *  - when the provision succeeds for KVM: this will start the VNC
+ *  - when the provision fails: calls VM.markVMFailure() to put it in 'failed'
+ *
+ */
+function handleProvisioning(vmobj, cb)
 {
-    if (ev.hasOwnProperty('zonename') && ev.hasOwnProperty('oldstate')
-        && ev.hasOwnProperty('newstate') && ev.hasOwnProperty('when')) {
+    var provision_fail_fn;
+    var provision_ok_fn;
+    var provisioning_fn;
 
-        if (ev.newstate === 'running') {
-            VM.log('NOTICE', '"' + ev.zonename + '" went from ' + ev.oldstate
-                + ' to running at ' + ev.when);
-            VM.load(ev.zonename, function (err, obj) {
-                if (err) {
-                    VM.log('ERROR', 'Unable to load vm', err);
-                } else if (obj.brand !== 'kvm') {
-                    // do nothing
-                    VM.log('DEBUG', 'Ignoring freshly started vm ' + obj.uuid
-                        + ' with brand=' + obj.brand);
-                } else {
+    // assert vmobj.state === 'provisioning'
+
+    function success() {
+        if (vmobj.brand === 'kvm') {
+            // reload the VM to see if we should setup VNC, etc.
+            VM.load(vmobj.uuid, function (load_err, obj) {
+                if (load_err) {
+                    log.error(load_err, 'unable to load VM after '
+                        + 'waiting for provision: ' + load_err.message);
+                    cb(load_err);
+                    return;
+                }
+                log.debug('VM state is ' + obj.state + ' after provisioning');
+                if (obj.state === 'running') {
                     // clear any old timers or VNC/SPICE since this vm just came
-                    // up, then spin up a new VNC.
+                    // up (state was provisioning), then spin up a new VNC.
                     clearVM(obj.uuid);
                     spawnRemoteDisplay(obj);
                 }
+                cb(null, 'success');
             });
+        } else {
+            cb(null, 'success');
+        }
+    }
+
+    function failure() {
+        VM.markVMFailure(vmobj, function (mark_err) {
+            VM.log.warn(mark_err, 'provisioning failed, zone is being stopped '
+                + 'for manual investigation.');
+            cb(null, 'failure');
+        });
+    }
+
+    provision_fail_fn = path.join(vmobj.zonepath,
+        'root/var/svc/provision_failure');
+    provision_ok_fn = path.join(vmobj.zonepath,
+        'root/var/svc/provision_success');
+    provisioning_fn = path.join(vmobj.zonepath,
+        'root/var/svc/provisioning');
+
+    if (fs.existsSync(provisioning_fn)) {
+        // wait for /var/svc/provisioning to disappear
+        VM.waitForProvisioning(vmobj, function (wait_err) {
+            VM.log.debug(wait_err, 'waited for provisioning');
+            if (wait_err) {
+                cb(wait_err);
+                return;
+            }
+            VM.unsetTransition(vmobj, function (unset_err) {
+                if (unset_err) {
+                    VM.log.debug(unset_err, 'failed to unset transition');
+                    failure();
+                } else {
+                    VM.log.debug('unset provision transition for '
+                        + vmobj.uuid);
+                    success();
+                }
+            });
+        });
+    } else if (fs.existsSync(provision_ok_fn)) {
+        // no /var/svc/provisioning file, but we have success file
+        VM.unsetTransition(vmobj, function (unset_err) {
+            if (unset_err) {
+                cb(unset_err);
+                return;
+            }
+            log.info(unset_err, 'unset "provisioning" because we saw '
+                + 'provision_success for ' + vmobj.uuid);
+            success();
+        });
+    } else if (fs.existsSync(provision_fail_fn)) {
+        // we failed but someone forgot to set the flag (state==provisioning)
+        VM.log.warn('Marking VM ' + vmobj.uuid + ' as a "failure" because '
+            + provision_fail_fn + ' exists.');
+        failure();
+    } else {
+        // none of the provisioning files exist and we only support zones which
+        // are going to handle these, so we must have succeeded and just missed
+        // clearing the provisioning state.
+        log.warn('all provisioning files missing, assuming provision success.');
+        VM.unsetTransition(vmobj, function (unset_err) {
+            if (unset_err) {
+                cb(unset_err);
+                return;
+            }
+            success();
+        });
+    }
+}
+
+// NOTE: nobody's paying attention to whether this completes or not.
+function updateZoneStatus(ev)
+{
+    if (! ev.hasOwnProperty('zonename') || ! ev.hasOwnProperty('oldstate')
+        || ! ev.hasOwnProperty('newstate') || ! ev.hasOwnProperty('when')) {
+
+        log.debug('skipping unknown event: ' + JSON.stringify(ev, null, 2));
+        return;
+    }
+
+    log.info('' + ev.zonename + ' went from ' + ev.oldstate
+        + ' to ' + ev.newstate + ' at ' + ev.when);
+
+    VM.load(ev.zonename, function (err, vmobj) {
+
+        if (err) {
+            log.warn(err, 'unable to load zone: ' + err.message);
+            return;
+        }
+
+        if (vmobj.failed) {
+            // never do anything to failed zones
+            log.info('doing nothing for ' + ev.zonename + ' transition because '
+                + ' VM is marked "failed".');
+            return;
+        }
+
+        if (vmobj.state === 'provisioning') {
+            // check that we're not already waiting.
+            if (PROV_WAIT.hasOwnProperty(vmobj.uuid)) {
+                log.trace('already waiting for ' + vmobj.uuid
+                    + ' to leave "provisioning"');
+                return;
+            }
+
+            PROV_WAIT[vmobj.uuid] = true;
+            handleProvisioning(vmobj, function (prov_err, result) {
+                // this waiter finishd so we're ok with another being started.
+                delete PROV_WAIT[vmobj.uuid];
+                if (prov_err) {
+                    log.error(prov_err, 'error handling provisioning state for'
+                        + ' ' + vmobj.uuid + ': ' + prov_err.message);
+                    return;
+                }
+                log.debug('handleProvision() for ' + vmobj.uuid + ' returned: '
+                    +  result);
+                return;
+            });
+
+        }
+
+        // don't handle transitions other than provisioning for non-kvm
+        if (vmobj.brand !== 'kvm') {
+            log.trace('doing nothing for ' + ev.zonename + ' transition '
+                + 'because  brand != "kvm"');
+            return;
+        }
+
+        if (ev.newstate === 'running') {
+            // clear any old timers or VNC/SPICE since this vm just came
+            // up, then spin up a new VNC.
+            clearVM(vmobj.uuid);
+            spawnRemoteDisplay(vmobj);
         } else if (ev.oldstate === 'running') {
-            VM.log('NOTICE', '"' + ev.zonename + '" went from running to '
-                + ev.newstate + ' at ' + ev.when);
             if (VNC.hasOwnProperty(ev.zonename)) {
                 // VMs always have zonename === uuid, so we can remove this
-                VM.log('INFO', 'clearing state for disappearing VM '
-                    + ev.zonename);
+                log.info('clearing state for disappearing VM ' + ev.zonename);
                 clearVM(ev.zonename);
             }
         } else if (ev.newstate === 'uninitialized') { // this means installed!?
-            VM.log('NOTICE', '"' + ev.zonename + '" went from running to '
-                + ev.newstate + ' at ' + ev.when);
             // XXX we're running stop so it will clear the transition marker
 
-            VM.load(ev.zonename, function (err, obj) {
-                if (err) {
-                    VM.log('ERROR', 'Unable to load vm', err);
-                } else if (obj.brand !== 'kvm') {
-                    // do nothing
-                    VM.log('DEBUG', 'Ignoring freshly stopped vm ' + obj.uuid
-                        + ' with brand=' + obj.brand);
-                } else {
-                    VM.stop(ev.zonename, {'force': true}, function (e) {
-                        if (e) {
-                            VM.log('ERROR', 'stop failed', e);
-                        }
-                    });
+            VM.stop(ev.zonename, {'force': true}, function (e) {
+                if (e) {
+                    log.error('stop failed', e);
                 }
             });
         }
-    } else {
-        VM.log('DEBUG', 'skip: ' + ev);
-    }
+    });
 }
 
 function startZoneWatcher(callback)
@@ -359,7 +501,7 @@ function startZoneWatcher(callback)
 
     watcher = spawn('/usr/vm/sbin/zoneevent', [], {'customFds': [-1, -1, -1]});
 
-    VM.log('INFO', 'zoneevent running with pid ' + watcher.pid);
+    log.info('zoneevent running with pid ' + watcher.pid);
 
     watcher.stdout.on('data', function (data) {
         var chunk;
@@ -378,7 +520,7 @@ function startZoneWatcher(callback)
     watcher.stdin.end();
 
     watcher.on('exit', function (code) {
-        VM.log('INFO', 'zoneevent watcher exited.');
+        log.info('zoneevent watcher exited.');
         watcher = null;
     });
 }
@@ -387,10 +529,10 @@ function handlePost(c, args, response)
 {
     var uuid;
 
-    VM.log('DEBUG', 'POST len: ' + c + args);
+    log.debug('POST len: ' + c + args);
 
     if (c.length !== 2 || c[0] !== 'vm') {
-        VM.log('DEBUG', '404 - handlePost ' + c.length + c);
+        log.debug('404 - handlePost ' + c.length + c);
         response.writeHead(404);
         response.end();
         return;
@@ -491,11 +633,11 @@ function getInfo(uuid, args, response)
         types.push('all');
     }
 
-    VM.log('DEBUG', 'TYPES: ' + JSON.stringify(types));
+    log.debug('TYPES: ' + JSON.stringify(types));
 
     infoVM(uuid, types, function (err, res) {
         if (err) {
-            VM.log('ERROR', err.message, err);
+            log.error(err.message, err);
             response.writeHead(500, { 'Content-Type': 'application/json'});
             response.end();
         } else {
@@ -510,7 +652,7 @@ function handleGet(c, args, response)
 {
     var uuid = c[1];
 
-    VM.log('DEBUG', 'GET (' + JSON.stringify(c) + ') len: ' + c.length);
+    log.debug('GET (' + JSON.stringify(c) + ') len: ' + c.length);
 
     if (c.length === 3 && c[0] === 'vm' && c[2] === 'info') {
         getInfo(uuid, args, response);
@@ -543,8 +685,8 @@ function startHTTPHandler()
 
         if (url_parts.hasOwnProperty('query')) {
             args = url_parts.query;
-            VM.log('DEBUG', 'url ' + request.url);
-            VM.log('DEBUG', 'args ' + JSON.stringify(args));
+            log.debug('url ' + request.url);
+            log.debug('args ' + JSON.stringify(args));
         } else {
             args = {};
         }
@@ -559,7 +701,7 @@ function startHTTPHandler()
                 var k;
                 var POST = qs.parse(body);
 
-                VM.log('DEBUG', 'POST: ' + JSON.stringify(POST));
+                log.debug('POST: ' + JSON.stringify(POST));
                 for (k in POST) {
                     if (POST.hasOwnProperty(k)) {
                         args[k] = POST[k];
@@ -574,7 +716,7 @@ function startHTTPHandler()
 
     for (ip in ips) {
         ip = ips[ip];
-        VM.log('DEBUG', 'LISTENING ON ' + ip + ':' + VMADMD_PORT);
+        log.debug('LISTENING ON ' + ip + ':' + VMADMD_PORT);
         http.createServer(handler).listen(VMADMD_PORT, ip);
     }
 }
@@ -590,7 +732,7 @@ function startHTTPHandler()
 
 function stopVM(uuid, timeout, callback)
 {
-    VM.log('DEBUG', 'DEBUG stop(' + uuid + ')');
+    log.debug('DEBUG stop(' + uuid + ')');
 
     if (!timeout) {
         callback(new Error('stopVM() requires timeout to be set.'));
@@ -603,12 +745,12 @@ function stopVM(uuid, timeout, callback)
         var q;
 
         if (err) {
-            VM.log('DEBUG', 'Unable to load vm: ' + err.message, err);
+            log.debug('Unable to load vm: ' + err.message, err);
             callback(err);
             return;
         }
 
-        q = new Qmp(VM.log);
+        q = new Qmp(log);
 
         if (obj.brand !== 'kvm') {
             callback(new Error('vmadmd only handles "stop" for kvm ('
@@ -623,7 +765,7 @@ function stopVM(uuid, timeout, callback)
                 return;
             }
             q.command('system_powerdown', null, function (e, result) {
-                VM.log('DEBUG', 'result: ' + JSON.stringify(result));
+                log.debug('result: ' + JSON.stringify(result));
                 q.disconnect();
 
                 // Setup to send kill when timeout expires
@@ -641,6 +783,7 @@ function infoVM(uuid, types, callback)
 {
     var res = {};
     var commands = [
+        'query-status',
         'query-version',
         'query-chardev',
         'query-block',
@@ -650,7 +793,7 @@ function infoVM(uuid, types, callback)
         'query-kvm'
     ];
 
-    VM.log('DEBUG', 'LOADING: ' + uuid);
+    log.debug('LOADING: ' + uuid);
 
     VM.load(uuid, function (err, obj) {
         var q;
@@ -674,7 +817,7 @@ function infoVM(uuid, types, callback)
             return;
         }
 
-        q = new Qmp(VM.log);
+        q = new Qmp(log);
 
         if (!types) {
             types = ['all'];
@@ -713,7 +856,7 @@ function infoVM(uuid, types, callback)
 
                 q.disconnect();
                 if (e) {
-                    VM.log('ERROR', 'getVMInfo(): Unknown Error', e);
+                    log.error('getVMInfo(): Unknown Error', e);
                     callback(e);
                 } else {
                     // key is in results[i][0], value in results[i][1]
@@ -768,7 +911,7 @@ function infoVM(uuid, types, callback)
 
 function resetVM(uuid, callback)
 {
-    VM.log('DEBUG', 'reset(' + uuid + ')');
+    log.debug('reset(' + uuid + ')');
 
     /* We load here to get the zonepath and ensure the vm exists. */
     VM.load(uuid, function (err, obj) {
@@ -776,7 +919,7 @@ function resetVM(uuid, callback)
         var socket;
 
         if (err) {
-            VM.log('DEBUG', 'Unable to load vm: ' + err.message, err);
+            log.debug('Unable to load vm: ' + err.message, err);
             callback(err);
             return;
         }
@@ -793,7 +936,7 @@ function resetVM(uuid, callback)
             return;
         }
 
-        q = new Qmp(VM.log);
+        q = new Qmp(log);
 
         socket = obj.zonepath + '/root/tmp/vm.qmp';
         q.connect(socket, function (error) {
@@ -801,7 +944,7 @@ function resetVM(uuid, callback)
                 callback(error);
             } else {
                 q.command('system_reset', null, function (e, result) {
-                    VM.log('DEBUG', 'result: ' + JSON.stringify(result));
+                    log.debug('result: ' + JSON.stringify(result));
                     q.disconnect();
                     callback();
                 });
@@ -814,7 +957,7 @@ function sysrqVM(uuid, req, callback)
 {
     var SUPPORTED_REQS = ['screenshot', 'nmi'];
 
-    VM.log('DEBUG', 'sysrq(' + uuid + ',' + req + ')');
+    log.debug('sysrq(' + uuid + ',' + req + ')');
 
     /* We load here to ensure this vm exists. */
     VM.load(uuid, function (err, obj) {
@@ -822,7 +965,7 @@ function sysrqVM(uuid, req, callback)
         var socket;
 
         if (err) {
-            VM.log('ERROR', 'unable to load vm: ' + err.message, err);
+            log.error('unable to load vm: ' + err.message, err);
             callback(err);
             return;
         }
@@ -846,7 +989,7 @@ function sysrqVM(uuid, req, callback)
             return;
         }
 
-        q = new Qmp(VM.log);
+        q = new Qmp(log);
 
         socket = obj.zonepath + '/root/tmp/vm.qmp';
         q.connect(socket, function (error) {
@@ -866,7 +1009,7 @@ function sysrqVM(uuid, req, callback)
                             function (e, result) {
 
                             // XXX check result?
-                            VM.log('DEBUG', 'sendkey err: '
+                            log.debug('sendkey err: '
                                 + JSON.stringify(e) + ' result: '
                                 + JSON.stringify(result));
                             cb(e);
@@ -876,7 +1019,7 @@ function sysrqVM(uuid, req, callback)
                             function (e, result) {
 
                             // XXX check result?
-                            VM.log('DEBUG', 'sendkey err: '
+                            log.debug('sendkey err: '
                                 + JSON.stringify(e) + ' result: '
                                 + JSON.stringify(result));
                             q.disconnect();
@@ -903,29 +1046,32 @@ function sysrqVM(uuid, req, callback)
 
 function setStopTimer(uuid, expire)
 {
-    VM.log('DEBUG', 'clearing existing timer');
+    log.debug('Clearing existing timer');
     clearTimer(uuid);
-    VM.log('DEBUG', 'SEtting STOP TIMER FOR ' + expire);
+    log.debug('Setting stop timer for ' + expire);
     TIMER[uuid] = setTimeout(function () {
-        VM.log('INFO', 'TIMEOUT');
+        log.info('Timed out for ' + uuid + ' forcing stop.');
         // reload and make sure we still need to kill.
         VM.load(uuid, function (e, obj) {
             if (e) {
-                VM.log('ERROR', 'expire(): Unable to load vm: ' + e.message, e);
+                log.error('expire(): Unable to load vm: ' + e.message, e);
                 return;
             }
-            // ensure we've not started and started stopping
-            // again since we checked.
-            VM.log('DEBUG', 'times two: ' + Date.now() + ' '
-                + obj.transition_expire);
+            log.debug('now ' + Date.now() + ' expire ' + obj.transition_expire);
+            // ensure we've not started and started stopping again since we
+            // checked.
             if (obj.state === 'stopping' && obj.transition_expire
                 && (Date.now() >= obj.transition_expire)) {
 
                 // We assume kill will clear the transition even if the
                 // vm is already stopped.
                 VM.stop(obj.uuid, {'force': true}, function (err) {
-                    VM.log('DEBUG', 'timeout vm.kill() = '
-                        + JSON.stringify(err));
+                    if (err) {
+                        log.debug(err, 'timeout VM.stop(force): '
+                            + err.message);
+                    } else {
+                        log.debug('stopped VM ' + uuid + ' after timeout');
+                    }
                 });
             }
         });
@@ -936,34 +1082,34 @@ function loadVM(vmobj, do_autoboot)
 {
     var expire;
 
-    VM.log('DEBUG', 'LOADING ' + JSON.stringify(vmobj));
+    log.debug('LOADING ' + JSON.stringify(vmobj));
 
     if (vmobj.never_booted || (vmobj.autoboot && do_autoboot)) {
         VM.start(vmobj.uuid, {}, function (err) {
             // XXX: this ignores errors!
-            VM.log('INFO', 'Autobooted ' + vmobj.uuid + ': [' + err + ']');
+            log.info(err, 'Autobooted ' + vmobj.uuid);
         });
     }
 
     if (vmobj.state === 'stopping' && vmobj.transition_expire) {
-        VM.log('DEBUG', 'times: ' + Date.now() + ' ' + vmobj.transition_expire);
+        log.debug('times: ' + Date.now() + ' ' + vmobj.transition_expire);
         if (Date.now() >= vmobj.transition_expire
             || (vmobj.transition_to === 'stopped'
                 && vmobj.zone_state === 'installed')) {
 
-            VM.log('INFO', 'killing VM with expired running stop: '
+            log.info('killing VM with expired running stop: '
                 + vmobj.uuid);
             // We assume kill will clear the transition even if the
             // vm is already stopped.
             VM.stop(vmobj.uuid, {'force': true}, function (err) {
-                VM.log('DEBUG', 'vm.kill() = ' + err.message, err);
+                log.debug(err, 'VM.stop(force): ' + err.message);
             });
         } else {
             expire = ((Number(vmobj.transition_expire) + 1000) - Date.now());
             setStopTimer(vmobj.uuid, expire);
         }
     } else {
-        VM.log('DEBUG', 'state: ' + vmobj.state + ' expire: '
+        log.debug('state: ' + vmobj.state + ' expire: '
             + vmobj.transition_expire);
     }
 
@@ -971,21 +1117,36 @@ function loadVM(vmobj, do_autoboot)
     spawnRemoteDisplay(vmobj);
 }
 
+// To help diagnose problems we write the keys we're watching to the TRACE log
+// which can be viewed using dtrace.
+function startTraceLoop() {
+    setInterval(function () {
+        var prov_wait_keys = Object.keys(PROV_WAIT);
+        var timer_keys = Object.keys(TIMER);
+
+        if (prov_wait_keys.length > 0) {
+            log.trace('PROV_WAIT keys: ' + JSON.stringify(prov_wait_keys));
+        }
+        if (timer_keys.length > 0) {
+            log.trace('TIMER keys: ' + JSON.stringify(timer_keys));
+        }
+    }, 5000);
+}
+
 // kicks everything off
 function main()
 {
     // XXX TODO: load fs-ext so we can flock a pid file to be exclusive
 
-    VM.resetLog('vmadmd');
-
     startZoneWatcher(updateZoneStatus);
     startHTTPHandler();
+    startTraceLoop();
 
     loadConfig(function (err) {
         var do_autoboot = false;
 
         if (err) {
-            VM.log('ERROR', 'Unable to load config', err);
+            log.error(err, 'Unable to load config');
             process.exit(2);
         }
 
@@ -1003,10 +1164,37 @@ function main()
             VM.lookup({}, {'full': true}, function (e, vmobjs) {
                 for (vmobj in vmobjs) {
                     vmobj = vmobjs[vmobj];
-                    if (vmobj.brand === 'kvm') {
+                    if (vmobj.state === 'failed') {
+                        log.debug('skipping failed VM ' + vmobj.uuid);
+                    } else if (vmobj.state === 'provisioning') {
+                        log.debug('at vmadmd startup, VM ' + vmobj.uuid + ' is '
+                            + 'in state "provisioning"');
+
+                        if (PROV_WAIT.hasOwnProperty(vmobj.uuid)) {
+                            log.warn('at vmadmd startup, already waiting for '
+                                + '"provisioning" for ' + vmobj.uuid);
+                            return;
+                        }
+
+                        PROV_WAIT[vmobj.uuid] = true;
+                        // this calls the callback when we go out of
+                        // provisioning one way or another.
+                        handleProvisioning(vmobj, function (prov_err, result) {
+                            delete PROV_WAIT[vmobj.uuid];
+                            if (prov_err) {
+                                log.error(prov_err, 'error handling '
+                                    + 'provisioning state for ' + vmobj.uuid
+                                    + ': ' + prov_err.message);
+                                return;
+                            }
+                            log.debug('at vmadmd startup, handleProvision() for'
+                                + ' ' + vmobj.uuid + ' returned: ' +  result);
+                        });
+                    } else if (vmobj.brand === 'kvm') {
+                        log.debug('calling loadVM(' + vmobj.uuid + ')');
                         loadVM(vmobj, do_autoboot);
                     } else {
-                        VM.log('DEBUG', 'ignoring non-kvm VM ' + vmobj.uuid);
+                        log.debug('ignoring non-kvm VM ' + vmobj.uuid);
                     }
                 }
             });
@@ -1015,11 +1203,27 @@ function main()
 }
 
 onlyif.rootInSmartosGlobal(function (err) {
-    VM.resetLog('vmadmd');
+    var log_stream = {
+        stream: process.stderr,
+        level: 'debug'
+    };
+
+    // have VM.js logs tagged with correct name and also output them in *our*
+    // smf service log (stderr)
+    VM.logname = 'vmadmd';
+    VM.logger = log_stream;
+
+    // setup vmadmd logger
+    log = new bunyan({
+        name: VM.logname,
+        streams: [log_stream],
+        serializers: bunyan.stdSerializers
+    });
+
     if (err) {
-        VM.log('ERROR', 'Fatal: cannot run because: ' + err);
+        log.error(err, 'Fatal: cannot run because: ' + err.message);
         process.exit(1);
     }
-    VM.log('NOTICE', 'Starting vmadmd');
+    log.info('Starting vmadmd');
     main();
 });
