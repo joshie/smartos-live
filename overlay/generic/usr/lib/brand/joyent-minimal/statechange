@@ -140,7 +140,13 @@ setup_net()
 		blocked_outgoing_ports=$(eval \
 		    echo \$_ZONECFG_net_${nic}_blocked_outgoing_ports)
 		zone_ip=$(eval echo \$_ZONECFG_net_${nic}_ip)
-		zone_ip6=$(eval echo \$_ZONECFG_net_${nic}_ip6)
+
+		# Fix for ip6
+		if [[ -z $zone_ip ]]; then
+			zone_ip=$(eval echo \$_ZONECFG_net_${nic}_ip6)
+		fi
+		# End fix
+
 		allow_dhcp_spoof=$(get_boolean_nic_property ${nic} allow_dhcp_spoofing)
 		allow_ip_spoof=$(get_boolean_nic_property ${nic} allow_ip_spoofing)
 		allow_mac_spoof=$(get_boolean_nic_property ${nic} allow_mac_spoofing)
