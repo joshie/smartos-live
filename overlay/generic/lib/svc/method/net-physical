@@ -342,7 +342,6 @@ else
 # bring up other dhcp
     # Bring up statically assigned interfaces, and find the primary DHCP
     # interface, if it exists
-   
     while IFS=: read -r iface addrtype; do
         for i in hostname dhcp hostname6 dhcp6 auto6; do
             if [[ -f /etc/${i}.${iface} ]]; then
@@ -359,7 +358,10 @@ else
                         /sbin/ifconfig ${iface} ${add}
                     ;;
                     dhcp*)
-                        dhcp_list=${dhcp_list},${iface}\ $add
+                        dhcp_list=${dhcp_list}\ ${iface}
+                    ;;
+                    dhcp6)
+                        dhcp6_list=${dhcp6_list}\ ${$iface}
                     ;;
                     auto6)
                         /sbin/ifconfig ${iface} ${add} up
@@ -368,15 +370,17 @@ else
                 break;
             fi
         done
-
     done < <(/usr/sbin/dladm show-vnic -p -o link,macaddrtype 2>/dev/null)
-    IFS=','
     add='dhcp primary'
     for i in $dhcp_list; do
         /sbin/ifconfig ${i} ${add}
 	add='dhcp start wait 0' 
     done
-    IFS=' '
+    add='dhcp primary'
+    for i in $dhcp6_list; do
+        /sbin/ifconfig ${i} inet6${add}
+	add='dhcp start wait 0' 
+    done
 fi
 
 log_if_state after
