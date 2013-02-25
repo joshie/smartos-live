@@ -375,7 +375,7 @@ else
     done
     add='dhcp primary'
     for i in $dhcp6_list; do
-        /sbin/ifconfig ${i} inet6${add}
+        /sbin/ifconfig ${i} inet6 ${add}
         add='dhcp start wait 0' 
     done
 fi
