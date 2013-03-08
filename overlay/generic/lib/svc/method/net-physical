@@ -354,7 +354,7 @@ else
                         [[ "${addrtype}" =~ "^vrrp" ]] && add=${add%% up}
                         /sbin/ifconfig ${iface} ${add}
                     ;;
-                    dhcp*)
+                    dhcp)
                         dhcp_list=${dhcp_list}\ ${iface}
                     ;;
                     dhcp6)
