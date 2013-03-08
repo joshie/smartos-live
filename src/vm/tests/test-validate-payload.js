@@ -5,8 +5,17 @@ var brand;
 var os_brands = ['joyent', 'joyent-minimal'];
 var test = require('tap').test;
 var VM = require('/usr/vm/node_modules/VM');
+var vmtest = require('../common/vmtest.js');
+
+var smartos_image_uuid = vmtest.CURRENT_SMARTOS_UUID;
+var ubuntu_image_uuid = vmtest.CURRENT_UBUNTU_UUID;
+var ubuntu_image_name = vmtest.CURRENT_UBUNTU_NAME;
+var ubuntu_image_size = vmtest.CURRENT_UBUNTU_SIZE;
 
 VM.loglevel = 'DEBUG';
+
+// This will ensure vmtest.CURRENT_* are installed
+vmtest.ensureCurrentImages();
 
 test('test nonexistent brand', function (t) {
     VM.validate('gorilla', 'create', {'hello': 'world'}, function (errors) {
@@ -45,7 +54,7 @@ for (brand in os_brands) {
     });
 
     test('minimal joyent payload', function (t) {
-        VM.validate(brand, 'create', {'brand': brand, 'image_uuid': '1c508270-a63a-11e1-bba4-f3ec226f563a'}, function (errors) {
+        VM.validate(brand, 'create', {'brand': brand, 'image_uuid': smartos_image_uuid}, function (errors) {
             t.ok(!errors, 'creating minimal joyent: ' + JSON.stringify(errors));
             t.end();
         });
@@ -54,7 +63,7 @@ for (brand in os_brands) {
     test('set invalid autoboot parameter', function (t) {
         VM.validate(brand, 'create', {
             'brand': brand,
-            'image_uuid': '1c508270-a63a-11e1-bba4-f3ec226f563a',
+            'image_uuid': smartos_image_uuid,
             'autoboot': 'aardvark'
             }, function (errors) {
 
@@ -69,7 +78,7 @@ for (brand in os_brands) {
     test('set non-string alias', function (t) {
         VM.validate(brand, 'create', {
             'brand': brand,
-            'image_uuid': '1c508270-a63a-11e1-bba4-f3ec226f563a',
+            'image_uuid': smartos_image_uuid,
             'alias': 42
             }, function (errors) {
 
@@ -84,7 +93,7 @@ for (brand in os_brands) {
     test('set invalid max_swap', function (t) {
         VM.validate(brand, 'create', {
             'brand': brand,
-            'image_uuid': '1c508270-a63a-11e1-bba4-f3ec226f563a',
+            'image_uuid': smartos_image_uuid,
             'max_swap': 128
             }, function (errors) {
 
@@ -99,7 +108,7 @@ for (brand in os_brands) {
     test('set non-integer cpu_cap', function (t) {
         VM.validate(brand, 'create', {
             'brand': brand,
-            'image_uuid': '1c508270-a63a-11e1-bba4-f3ec226f563a',
+            'image_uuid': smartos_image_uuid,
             'cpu_cap': 'doogle'
             }, function (errors) {
 
@@ -114,7 +123,7 @@ for (brand in os_brands) {
     test('set non-existent zpool', function (t) {
         VM.validate(brand, 'create', {
             'brand': brand,
-            'image_uuid': '1c508270-a63a-11e1-bba4-f3ec226f563a',
+            'image_uuid': smartos_image_uuid,
             'zpool': 'doogle'
             }, function (errors) {
 
@@ -129,7 +138,7 @@ for (brand in os_brands) {
     test('set zones zpool', function (t) {
         VM.validate(brand, 'create', {
             'brand': brand,
-            'image_uuid': '1c508270-a63a-11e1-bba4-f3ec226f563a',
+            'image_uuid': smartos_image_uuid,
             'zpool': 'zones'
             }, function (errors) {
 
@@ -141,7 +150,7 @@ for (brand in os_brands) {
     test('set bad customer metadata', function (t) {
         VM.validate(brand, 'create', {
             'brand': brand,
-            'image_uuid': '1c508270-a63a-11e1-bba4-f3ec226f563a',
+            'image_uuid': smartos_image_uuid,
             'customer_metadata': {'hello': {'complicated': 'world'}}
             }, function (errors) {
 
@@ -156,7 +165,7 @@ for (brand in os_brands) {
     test('set good customer metadata', function (t) {
         VM.validate(brand, 'create', {
             'brand': brand,
-            'image_uuid': '1c508270-a63a-11e1-bba4-f3ec226f563a',
+            'image_uuid': smartos_image_uuid,
             'customer_metadata': {
                 'hello': 'world',
                 'these keys should be valid': true,
@@ -174,7 +183,7 @@ for (brand in os_brands) {
     test('set good array fs_allowed', function (t) {
         VM.validate(brand, 'create', {
                 'brand': brand,
-                'image_uuid': '1c508270-a63a-11e1-bba4-f3ec226f563a',
+                'image_uuid': smartos_image_uuid,
                 'fs_allowed': ['ufs', 'tmpfs', 'pcfs']
             }, function (errors) {
 
@@ -186,7 +195,7 @@ for (brand in os_brands) {
     test('set good string fs_allowed', function (t) {
         VM.validate(brand, 'create', {
                 'brand': brand,
-                'image_uuid': '1c508270-a63a-11e1-bba4-f3ec226f563a',
+                'image_uuid': smartos_image_uuid,
                 'fs_allowed': 'ufs,tmpfs,pcfs'
             }, function (errors) {
 
@@ -198,7 +207,7 @@ for (brand in os_brands) {
     test('set bad array fs_allowed', function (t) {
         VM.validate(brand, 'create', {
                 'brand': brand,
-                'image_uuid': '1c508270-a63a-11e1-bba4-f3ec226f563a',
+                'image_uuid': smartos_image_uuid,
                 'fs_allowed': ['ufs,tmpfs,pcfs']
             }, function (errors) {
 
@@ -213,7 +222,7 @@ for (brand in os_brands) {
     test('set bad object fs_allowed', function (t) {
         VM.validate(brand, 'create', {
                 'brand': brand,
-                'image_uuid': '1c508270-a63a-11e1-bba4-f3ec226f563a',
+                'image_uuid': smartos_image_uuid,
                 'fs_allowed': {'hello': 'world'}
             }, function (errors) {
 
@@ -228,7 +237,7 @@ for (brand in os_brands) {
     test('set good nic list', function (t) {
         VM.validate(brand, 'create', {
                 'brand': brand,
-                'image_uuid': '1c508270-a63a-11e1-bba4-f3ec226f563a',
+                'image_uuid': smartos_image_uuid,
                 'nics': [{'nic_tag': 'admin', 'ip': 'dhcp'}]
             }, function (errors) {
 
@@ -240,7 +249,7 @@ for (brand in os_brands) {
     test('set bad nic obj', function (t) {
         VM.validate(brand, 'create', {
                 'brand': brand,
-                'image_uuid': '1c508270-a63a-11e1-bba4-f3ec226f563a',
+                'image_uuid': smartos_image_uuid,
                 'nics': {}
             }, function (errors) {
 
@@ -255,7 +264,7 @@ for (brand in os_brands) {
     test('set bad nic string', function (t) {
         VM.validate(brand, 'create', {
                 'brand': brand,
-                'image_uuid': '1c508270-a63a-11e1-bba4-f3ec226f563a',
+                'image_uuid': smartos_image_uuid,
                 'nics': '[{\'nic_tag\': \'admin\', \'ip\': \'dhcp\'}]'
             }, function (errors) {
 
@@ -270,7 +279,7 @@ for (brand in os_brands) {
     test('set update nics good fails on create', function (t) {
         VM.validate(brand, 'create', {
                 'brand': brand,
-                'image_uuid': '1c508270-a63a-11e1-bba4-f3ec226f563a',
+                'image_uuid': smartos_image_uuid,
                 'update_nics': [{'mac': '01:02:03:0a:0b:0c', 'nic_tag': 'external'}]
             }, function (errors) {
 
@@ -441,9 +450,9 @@ test('man page kvm create payload', function (t) {
          {
            'boot': true,
            'model': 'virtio',
-           'image_uuid': 'e173ecd7-4809-4429-af12-5d11bcc29fd8',
-           'image_name': 'ubuntu-10.04.2.7',
-           'image_size': 5120
+           'image_uuid': ubuntu_image_uuid,
+           'image_name': ubuntu_image_name,
+           'image_size': ubuntu_image_size
          }
        ],
        'nics': [
@@ -478,6 +487,220 @@ test('man page kvm add nic payload', function (t) {
     };
     VM.validate('kvm', 'update', payload, function (errors) {
         t.ok(!errors, 'update (add nic) example kvm: ' + JSON.stringify(errors));
+        t.end();
+    });
+});
+
+test('add disk with both size and image_uuid should fail', function (t) {
+    var payload = {
+       "add_disks": [
+         {
+           'model': 'virtio',
+           'image_uuid': ubuntu_image_uuid,
+           'size': ubuntu_image_size
+         }
+       ]
+    };
+    VM.validate('kvm', 'update', payload, function (errors) {
+        t.ok(errors, 'add disk with size and image_uuid should fail: ' + JSON.stringify(errors));
+        t.end();
+    });
+});
+
+test('kvm create with bad disk (image_uuid + size)', function (t) {
+    var payload = {
+       'brand': 'kvm',
+       'vcpus': 1,
+       'ram': 256,
+       'disks': [
+         {
+           'boot': true,
+           'model': 'virtio',
+           'image_uuid': ubuntu_image_uuid,
+           'image_name': ubuntu_image_name,
+           'size': ubuntu_image_size
+         }
+       ],
+       'nics': [
+         {
+           'nic_tag': 'external',
+           'model': 'virtio',
+           'ip': '10.88.88.51',
+           'netmask': '255.255.255.0',
+           'gateway': '10.88.88.2',
+           'primary': true
+         }
+       ]
+    };
+    VM.validate('kvm', 'create', payload, function (errors) {
+        t.ok(errors, 'create with bad disk (image_uuid + size): ' + JSON.stringify(errors));
+        t.end();
+    });
+});
+
+test('kvm create with bad disk (image_uuid + block_size)', function (t) {
+    var payload = {
+       'brand': 'kvm',
+       'vcpus': 1,
+       'ram': 256,
+       'disks': [
+         {
+           'boot': true,
+           'model': 'virtio',
+           'image_uuid': ubuntu_image_uuid,
+           'image_name': ubuntu_image_name,
+           'image_size': ubuntu_image_size,
+           'block_size': 8192
+         }
+       ],
+       'nics': [
+         {
+           'nic_tag': 'external',
+           'model': 'virtio',
+           'ip': '10.88.88.51',
+           'netmask': '255.255.255.0',
+           'gateway': '10.88.88.2',
+           'primary': true
+         }
+       ]
+    };
+    VM.validate('kvm', 'create', payload, function (errors) {
+        t.ok(errors, 'create with bad disk (image_uuid + block_size): ' + JSON.stringify(errors));
+        t.end();
+    });
+});
+
+
+test('add disk with both image_size and image_uuid should succeed', function (t) {
+    var payload = {
+       "add_disks": [
+         {
+           'model': 'virtio',
+           'image_uuid': ubuntu_image_uuid,
+           'image_size': ubuntu_image_size
+         }
+       ]
+    };
+    VM.validate('kvm', 'update', payload, function (errors) {
+        t.ok(!errors, 'add disk with image_size and image_uuid: ' + JSON.stringify(errors));
+        t.end();
+    });
+});
+
+test('kvm create with good disk (image_uuid + image_size)', function (t) {
+    var payload = {
+       'brand': 'kvm',
+       'vcpus': 1,
+       'ram': 256,
+       'disks': [
+         {
+           'boot': true,
+           'model': 'virtio',
+           'image_uuid': ubuntu_image_uuid,
+           'image_name': ubuntu_image_name,
+           'image_size': ubuntu_image_size
+         }
+       ],
+       'nics': [
+         {
+           'nic_tag': 'external',
+           'model': 'virtio',
+           'ip': '10.88.88.51',
+           'netmask': '255.255.255.0',
+           'gateway': '10.88.88.2',
+           'primary': true
+         }
+       ]
+    };
+    VM.validate('kvm', 'create', payload, function (errors) {
+        t.ok(!errors, 'create with good disk (image_uuid + image_size): ' + JSON.stringify(errors));
+        t.end();
+    });
+});
+
+test('add disk with just size should succeed', function (t) {
+    var payload = {
+       "add_disks": [
+         {
+           'model': 'virtio',
+           'size': 5120
+         }
+       ]
+    };
+    VM.validate('kvm', 'update', payload, function (errors) {
+        t.ok(!errors, 'add disk with just size: ' + JSON.stringify(errors));
+        t.end();
+    });
+});
+
+test('kvm create with good disk (just size)', function (t) {
+    var payload = {
+       'brand': 'kvm',
+       'vcpus': 1,
+       'ram': 256,
+       'disks': [
+         {
+           'boot': true,
+           'model': 'virtio',
+           'size': 5120
+         }
+       ],
+       'nics': [
+         {
+           'nic_tag': 'external',
+           'model': 'virtio',
+           'ip': '10.88.88.51',
+           'netmask': '255.255.255.0',
+           'gateway': '10.88.88.2',
+           'primary': true
+         }
+       ]
+    };
+    VM.validate('kvm', 'create', payload, function (errors) {
+        t.ok(!errors, 'create with good disk (just size): ' + JSON.stringify(errors));
+        t.end();
+    });
+});
+
+test('create OS VM with non-existent image_uuid', function (t) {
+    VM.validate('joyent-minimal', 'create', {
+        'brand': 'joyent-minimal',
+        'image_uuid': 'a1fac27c-85fb-11e2-ae84-276612e8990c',
+        'ram': 256
+        }, function (errors) {
+
+        t.ok(errors, 'invalid payload');
+        if (errors) {
+            t.ok(errors.bad_values.indexOf('image_uuid') !== -1, 'confirm that it is image_uuid breaking: ' + JSON.stringify(errors));
+        }
+        t.end();
+    });
+});
+
+test('create KVM VM with non-existent image_uuid', function (t) {
+    VM.validate('kvm', 'create', {
+        'brand': 'kvm',
+        'disks': [{'image_uuid': 'a1fac27c-85fb-11e2-ae84-276612e8990c', 'image_size': 5120, 'model': 'virtio'}],
+        'ram': 256
+        }, function (errors) {
+
+        t.ok(errors, 'invalid payload');
+        if (errors) {
+            t.ok(errors.bad_values.indexOf('disks.0.image_uuid') !== -1, 'confirm that it is image_uuid breaking: ' + JSON.stringify(errors));
+        }
+        t.end();
+    });
+});
+
+test('add disk to KVM VM with non-existent image_uuid', function (t) {
+    VM.validate('kvm', 'update', {
+        'add_disks': [{'image_uuid': 'a1fac27c-85fb-11e2-ae84-276612e8990c', 'image_size': 5120, 'model': 'virtio'}],
+        }, function (errors) {
+
+        t.ok(errors, 'invalid payload');
+        if (errors) {
+            t.ok(errors.bad_values.indexOf('add_disks.0.image_uuid') !== -1, 'confirm that it is image_uuid breaking: ' + JSON.stringify(errors));
+        }
         t.end();
     });
 });
