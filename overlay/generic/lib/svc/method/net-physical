@@ -342,17 +342,17 @@ else
     while IFS=: read -r iface addrtype; do
         for i in hostname dhcp hostname6 dhcp6 auto6; do
             if [[ -f /etc/${i}.${iface} ]]; then
-                [[ "${i}" =~ '6' ]] && add='inet6' || add=''
-                /sbin/ifconfig ${iface} ${add} plumb
+                [[ "${i}" =~ '6' ]] && add=' inet6' || add=''
+                /sbin/ifconfig ${iface}${add} plumb
                 if [[ "${i}" == 'hostname6' ]]; then
-                    iface=${iface}:1
-                    /sbin/ifconfig ${iface} ${add} plumb
+                    add=":1 ${add}"
+                    /sbin/ifconfig ${iface}${add} plumb
                 fi
                 case $i in
                     hostname*)
-                        add="${add} `cat /etc/${i}.${iface}` up"
+                        add="${add} "`cat /etc/${i}.${iface}`" up"
                         [[ "${addrtype}" =~ "^vrrp" ]] && add=${add%% up}
-                        /sbin/ifconfig ${iface} ${add}
+                        /sbin/ifconfig ${iface}${add}
                     ;;
                     dhcp)
                         dhcp_list=${dhcp_list}\ ${iface}
@@ -361,7 +361,7 @@ else
                         dhcp6_list=${dhcp6_list}\ ${iface}
                     ;;
                     auto6)
-                        /sbin/ifconfig ${iface} ${add} up
+                        /sbin/ifconfig ${iface} inet6 up
                     ;;
                 esac
                 break;

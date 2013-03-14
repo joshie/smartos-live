@@ -111,7 +111,6 @@ setup_net()
 		blocked_outgoing_ports=$(eval \
 		    echo \$_ZONECFG_net_${nic}_blocked_outgoing_ports)
 		zone_ip=$(eval echo \$_ZONECFG_net_${nic}_ip)
-		zone_ip6=$(eval echo \$_ZONECFG_net_${nic}_ip6)
 		allow_dhcp_spoof=$(get_boolean_nic_property ${nic} allow_dhcp_spoofing)
 		allow_ip_spoof=$(get_boolean_nic_property ${nic} allow_ip_spoofing)
 		allow_mac_spoof=$(get_boolean_nic_property ${nic} allow_mac_spoofing)
@@ -119,8 +118,6 @@ setup_net()
 		    allow_restricted_traffic)
 		allow_unfiltered_promisc=$(get_boolean_nic_property ${nic} \
 		    allow_unfiltered_promisc)
-		allowed_ips=$(eval echo ${zone_ip// } ${zone_ip6// } \
-		    | sed 's| |,|g;s|/[0-9]*||g')
 
 		# If address set, must be a shared stack zone
 		[[ -n $address ]] && exit 0
@@ -262,16 +259,16 @@ setup_net()
 
 
 
-		if [[ -n "${allowed_ips}" ]] && [[ $allow_ip_spoof != "true" ]] && \
-			    [[ "${zone_ip}" != "dhcp" ]]  && [[ "${zone_ip6}" != "dhcp" ]] && \
-			    [[ "${zone_ip6}" != "auto" ]]; then
+		if [[ -n "${zone_ip}" ]] && [[ $allow_ip_spoof != "true" ]] && \
+			    [[ "${zone_ip}" != "dhcp" ]]  && [[ "${zone_ip}" != "dhcp6" ]] && \
+			    [[ "${zone_ip}" != "auto6" ]]; then
 			dladm set-linkprop -t -z $ZONENAME \
-			    -p "allowed-ips=${allowed_ips}" ${nic}
+			    -p "allowed-ips=${zone_ip}" ${nic}
 			if (( $? != 0 )); then
-				echo "error setting VNIC allowed-ips " \
+				echo "error setting VNIC allowed-ip " \
 				    "$nic $allowed_ips"
 				logger -p daemon.err "zone $ZONENAME " \
-				    "error setting VNIC allowed-ips " \
+				    "error setting VNIC allowed-ip " \
 				    "$nic $allowed_ips"
 				exit 1
 			fi
